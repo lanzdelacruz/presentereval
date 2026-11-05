@@ -1,0 +1,1312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>PresenterEval</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Live evaluation of classroom reports: weighted rubric, flagged moments, voice and video notes, offline-safe storage.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&display=swap">
+<style>
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+/* Layout: sticky instrument bar (clock + flag) over a session band with the timeline,
+   then rubric | sticky score rail, then flagged moments | saved evaluations.
+   Palette: classroom chalkboard green with chalk-yellow flags and a tally-red record light. */
+:root{
+  --bg:#F2F5F2; --surface:#FFFFFF; --sunk:#E6ECE7; --line:#C8D5CC;
+  --ink:#13211B; --ink-2:#4A5C53;
+  --accent:#1B6A4F; --accent-ink:#FFFFFF; --accent-soft:#DCEDE5;
+  --chalk:#F2CB55; --chalk-ink:#2A2203;
+  --rec:#C2352A; --rec-ink:#FFFFFF;
+  --good:#1B7A4C; --warn:#9A6200; --bad:#B3261E; --focus:#1B5FCC;
+  --font-body:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  --font-mono:"Atkinson Hyperlegible Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --radius:10px; --bar-h:72px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1B16; --surface:#15241E; --sunk:#1C2E26; --line:#2D453A;
+    --ink:#E5EEE8; --ink-2:#A3B7AC;
+    --accent:#6BCDA4; --accent-ink:#0A1A13; --accent-soft:#1D3A2E;
+    --chalk:#EDC453; --chalk-ink:#241D02;
+    --rec:#FF7466; --rec-ink:#2A0905;
+    --good:#6FD3A0; --warn:#F0B44C; --bad:#FF8A80; --focus:#8AB4FF;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1B16; --surface:#15241E; --sunk:#1C2E26; --line:#2D453A;
+  --ink:#E5EEE8; --ink-2:#A3B7AC;
+  --accent:#6BCDA4; --accent-ink:#0A1A13; --accent-soft:#1D3A2E;
+  --chalk:#EDC453; --chalk-ink:#241D02;
+  --rec:#FF7466; --rec-ink:#2A0905;
+  --good:#6FD3A0; --warn:#F0B44C; --bad:#FF8A80; --focus:#8AB4FF;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--ink);font:400 1rem/1.5 var(--font-body)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+h1,h2,h3{margin:0;line-height:1.2;text-wrap:balance}
+h2{font-size:1.25rem;letter-spacing:-.01em}
+h3{font-size:1.0625rem}
+p{margin:0}
+.wrap{max-width:1200px;margin-inline:auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-2)}
+.small{font-size:.875rem}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.skip{position:absolute;left:16px;top:-60px;z-index:20;background:var(--accent);color:var(--accent-ink);padding:10px 14px;border-radius:8px;font-weight:700}
+.skip:focus{top:calc(env(safe-area-inset-top,0px) + 8px)}
+kbd{font:600 .75rem/1 var(--font-mono);padding:3px 6px;border:1px solid currentColor;border-radius:4px;opacity:.85}
+
+/* Buttons */
+.btn{font:700 .9375rem/1.2 var(--font-body);min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-align:center}
+.btn:hover{border-color:var(--ink-2)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{border-color:var(--ink)}
+.btn-flag{background:var(--chalk);border-color:var(--chalk);color:var(--chalk-ink)}
+.btn-flag:hover{border-color:var(--chalk-ink)}
+.btn-ghost{background:transparent}
+.btn-wide{width:100%}
+.btn-sm{min-height:40px;padding:0 12px;font-size:.875rem}
+.btn.rec-btn[aria-pressed="true"]{background:var(--rec);border-color:var(--rec);color:var(--rec-ink)}
+.btn.is-confirm{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.linkbtn{font:700 .8125rem var(--font-body);color:var(--ink-2);background:none;border:0;padding:6px 4px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;min-height:32px}
+.linkbtn:hover{color:var(--ink)}
+.linkbtn.is-confirm{color:var(--bad)}
+.btn-flag.flash{animation:flash .45s ease-out}
+@keyframes flash{from{box-shadow:0 0 0 0 var(--chalk)}to{box-shadow:0 0 0 14px transparent}}
+
+/* Top bar */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar-in{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-block:10px}
+.brand{font-size:1.125rem;font-weight:700;display:flex;align-items:center;gap:8px;margin-right:auto}
+.brand svg{flex:none}
+.net{display:inline-flex;align-items:center;gap:7px;font-size:.8125rem;padding:5px 10px;border-radius:99px;background:var(--sunk);color:var(--ink);margin:0}
+.net .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-2);flex:none}
+.net[data-state="ok"] .dot{background:var(--good)}
+.net[data-state="offline"] .dot,.net[data-state="warn"] .dot{background:var(--warn)}
+.net[data-state="offline"]{background:var(--chalk);color:var(--chalk-ink)}
+.net[data-state="offline"] .dot{background:var(--chalk-ink)}
+.net[data-state="sync"] .dot{background:var(--accent);animation:pulse 1s ease-in-out infinite alternate}
+@keyframes pulse{to{opacity:.3}}
+.clockbox{display:flex;align-items:baseline;gap:6px}
+.clock{font:600 1.75rem/1 var(--font-mono);font-variant-numeric:tabular-nums;min-width:4.2ch;text-align:right}
+.clock-of{font-size:.8125rem;color:var(--ink-2);font-family:var(--font-mono)}
+.clockbox.is-over .clock,.clockbox.is-over .clock-of{color:var(--bad)}
+.clockbox.is-running .clock::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--rec);margin-right:8px;vertical-align:middle;transform:translateY(-3px)}
+
+/* Main */
+main.wrap{display:grid;gap:24px;padding-block:20px 56px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px}
+.cols{display:grid;gap:24px;align-items:start;grid-template-columns:minmax(0,1fr)}
+@media (min-width:960px){
+  .cols{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr)}
+  .score{position:sticky;top:calc(env(safe-area-inset-top,0px) + var(--bar-h) + 16px)}
+}
+
+/* Fields */
+.lbl{display:block;font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin-bottom:6px}
+input[type="text"],input[type="number"],textarea{width:100%;font:400 1rem/1.4 var(--font-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-height:44px}
+textarea{resize:vertical;min-height:64px}
+input:hover,textarea:hover{border-color:var(--ink-2)}
+input[type="range"]{width:100%;accent-color:var(--accent);min-height:32px}
+input[type="checkbox"]{width:20px;height:20px;accent-color:var(--accent)}
+.fields{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr))}
+.session{display:grid;gap:18px}
+.clockrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px}
+
+/* Timeline */
+.timeline{position:relative;margin:0;padding-top:46px}
+.tl-marks{position:absolute;left:0;right:0;top:0;height:42px;margin:0;padding:0;list-style:none;--scale:600000}
+.tl-mark{position:absolute;bottom:0;left:clamp(0%,calc(var(--t) / var(--scale) * 100%),100%);transform:translateX(-50%)}
+.tl-mark button{display:block;width:24px;height:40px;padding:0;border:0;background:transparent;cursor:pointer;position:relative;border-radius:4px}
+.tl-mark button::before{content:"";position:absolute;left:11px;bottom:0;width:2px;height:34px;background:var(--ink-2)}
+.tl-mark button::after{content:"";position:absolute;left:13px;top:6px;width:12px;height:10px;background:var(--tone);clip-path:polygon(0 0,100% 0,72% 50%,100% 100%,0 100%)}
+.tl-tip{position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);white-space:nowrap;background:var(--ink);color:var(--bg);font:600 .75rem/1 var(--font-body);padding:6px 8px;border-radius:6px;pointer-events:none;opacity:0}
+.tl-mark button:hover .tl-tip,.tl-mark button:focus-visible .tl-tip{opacity:1}
+.tl-mark:first-child .tl-tip{left:0;transform:none}
+.tl-limit{position:absolute;bottom:22px;width:2px;height:22px;background:var(--bad);transform:translateX(-1px)}
+.tl-scale{display:flex;justify-content:space-between;margin-top:6px;font:400 .75rem var(--font-mono);color:var(--ink-2)}
+progress{-webkit-appearance:none;appearance:none;display:block;width:100%;height:10px;border:0;border-radius:99px;background:var(--sunk);overflow:hidden;accent-color:var(--accent)}
+progress::-webkit-progress-bar{background:var(--sunk);border-radius:99px}
+progress::-webkit-progress-value{background:var(--accent);border-radius:99px}
+progress::-moz-progress-bar{background:var(--accent);border-radius:99px}
+.timeline.is-over progress::-webkit-progress-value{background:var(--bad)}
+.timeline.is-over progress::-moz-progress-bar{background:var(--bad)}
+
+/* Tone colors */
+.tone-good{--tone:var(--good)}
+.tone-warn{--tone:var(--warn)}
+.tone-neutral{--tone:var(--chalk)}
+.tone-media{--tone:var(--rec)}
+
+.groups{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.group{border:0;margin:0;padding:0;min-width:0;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start}
+.group legend{padding:0;margin-bottom:8px;font-size:.75rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}
+.chipbtn::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--tone);flex:none}
+.recstatus{flex-basis:100%;font-size:.875rem;color:var(--ink-2);min-height:1.3em}
+.recstatus.is-live{color:var(--rec);font-weight:700}
+.preview{flex-basis:100%;width:100%;max-width:320px;aspect-ratio:16/9;background:var(--sunk);border-radius:8px;object-fit:cover}
+.fallback{flex-basis:100%;display:grid;gap:6px;padding:12px;border:1px dashed var(--line);border-radius:8px;font-size:.875rem}
+.fallback label{font-weight:700}
+.draftstate{font-size:.8125rem;color:var(--ink-2)}
+
+/* Rubric */
+.rubric{display:grid;gap:14px}
+.crits{display:grid;gap:12px}
+.crit{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:16px;display:grid;gap:12px}
+.crit.is-active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.crit fieldset{border:0;margin:0;padding:0;min-width:0;display:grid;gap:10px}
+.crit legend{display:flex;justify-content:space-between;align-items:baseline;gap:12px;width:100%;padding:0;font-weight:700;font-size:1.0625rem}
+.crit-w{font:600 .8125rem var(--font-mono);color:var(--ink-2)}
+.pips{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.pip{position:relative;display:grid;justify-items:center;gap:1px;padding:8px 2px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;min-height:56px}
+.pip input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.pip-n{font:600 1.125rem/1.2 var(--font-mono)}
+.pip-w{font-size:.75rem;color:var(--ink-2)}
+.pip:hover{border-color:var(--ink-2)}
+.pip:has(input:checked){background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.pip input:checked ~ .pip-w{color:var(--accent-ink)}
+.pip:has(input:focus-visible){outline:3px solid var(--focus);outline-offset:2px}
+.desc{font-size:.9375rem;min-height:1.5em}
+.desc strong{font-weight:700}
+.timefact{font:400 .8125rem var(--font-mono);color:var(--ink-2)}
+.meterline{display:flex;align-items:center;gap:12px}
+.meterline output{font:600 .875rem var(--font-mono);min-width:4.5ch;text-align:right}
+meter{-webkit-appearance:none;appearance:none;flex:1;width:100%;height:8px;border:0;border-radius:99px;background:var(--sunk)}
+meter::-webkit-meter-bar{background:var(--sunk);border:0;border-radius:99px;height:8px}
+meter::-webkit-meter-optimum-value{background:var(--good);border-radius:99px}
+meter::-webkit-meter-suboptimum-value{background:var(--warn);border-radius:99px}
+meter::-webkit-meter-even-less-good-value{background:var(--bad);border-radius:99px}
+meter:-moz-meter-optimum::-moz-meter-bar{background:var(--good)}
+meter:-moz-meter-sub-optimum::-moz-meter-bar{background:var(--warn)}
+meter:-moz-meter-sub-sub-optimum::-moz-meter-bar{background:var(--bad)}
+details summary{list-style:none;cursor:pointer;font-weight:700;font-size:.875rem;color:var(--accent);min-height:32px;display:flex;align-items:center;gap:8px}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:"";border-left:7px solid currentColor;border-block:5px solid transparent;transition:transform .15s}
+details[open] > summary::before{transform:rotate(90deg)}
+details summary .has{font:600 .75rem var(--font-body);color:var(--ink-2)}
+.dbody{display:grid;gap:12px;padding-top:8px}
+.wline{display:flex;justify-content:space-between;align-items:baseline}
+
+/* Score rail */
+.score{display:grid;gap:14px}
+.total{display:flex;align-items:baseline;gap:6px}
+.total output{font:600 3rem/1 var(--font-mono);font-variant-numeric:tabular-nums}
+.total .of{font:400 1rem var(--font-mono);color:var(--ink-2)}
+dl{margin:0;display:grid;gap:0}
+dl > div{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+dt{color:var(--ink-2);font-size:.9375rem}
+dd{margin:0;font:600 .9375rem var(--font-mono);font-variant-numeric:tabular-nums;text-align:right}
+dd .muted{font-weight:400}
+.msg{font-size:.875rem;font-weight:700;color:var(--bad)}
+.msg.ok{color:var(--good)}
+
+/* Moments */
+.list{list-style:none;margin:0;padding:0}
+.moment{border-top:1px solid var(--line);padding-block:12px}
+.moment:first-child{border-top:0}
+.moment article{display:grid;gap:8px}
+.moment header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.stamp{font:600 .875rem var(--font-mono);font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:6px;background:var(--sunk);padding:3px 8px;border-radius:6px}
+.stamp::before{content:"";width:8px;height:8px;border-radius:2px;background:var(--tone)}
+.tag{font-weight:700}
+.moment header .linkbtn{margin-left:auto}
+.moment textarea{min-height:44px}
+.moment audio,.moment video{width:100%;max-width:420px}
+.moment video{border-radius:8px;background:var(--sunk)}
+.moment.is-focus{background:var(--accent-soft);margin-inline:-8px;padding-inline:8px;border-radius:8px}
+.empty{padding:16px;border:1px dashed var(--line);border-radius:8px;color:var(--ink-2);font-size:.9375rem}
+
+/* Saved */
+.saved{border-top:1px solid var(--line);padding-block:14px}
+.saved:first-child{border-top:0}
+.saved article{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
+.saved .meta{font-size:.8125rem;color:var(--ink-2);overflow-wrap:anywhere}
+.saved .pts{font:600 1.5rem/1 var(--font-mono);text-align:right}
+.saved .pts span{font-size:.75rem;color:var(--ink-2);font-weight:400}
+.saved .row{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.saved details{grid-column:1 / -1}
+.saved .dbody ol{margin:0;padding-left:1.2em;display:grid;gap:4px;font-size:.875rem}
+.pill{font:700 .75rem var(--font-body);padding:3px 8px;border-radius:99px;background:var(--sunk);color:var(--ink-2)}
+.pill[data-s="synced"]{background:var(--accent-soft);color:var(--ink)}
+.pill[data-s="pending"]{background:var(--chalk);color:var(--chalk-ink)}
+.tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding-top:14px;border-top:1px solid var(--line)}
+.toggle{display:inline-flex;align-items:center;gap:8px;font-size:.875rem;font-weight:700;min-height:44px;cursor:pointer}
+
+/* Dialog */
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);padding:24px;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px)}
+dialog::backdrop{background:rgb(0 0 0 / .5)}
+.keys{width:100%;border-collapse:collapse;font-size:.9375rem;margin-block:12px 18px}
+.keys th,.keys td{padding:8px 0;border-top:1px solid var(--line);text-align:left;vertical-align:top}
+.keys th{width:40%;padding-right:12px;font-weight:400;white-space:nowrap}
+
+@media (max-width:520px){
+  .clock{font-size:1.5rem}
+  .bar .btn-ghost .lbltext{display:none}
+  .pip-w{font-size:.6875rem}
+}
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#rubric">Skip to rubric</a>
+
+<header class="bar" id="bar">
+  <div class="wrap bar-in">
+    <h1 class="brand">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="3" width="20" height="14" rx="2" fill="var(--accent)"/><path d="M6 13l3-4 3 3 4-6" stroke="var(--chalk)" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="17" width="4" height="3" fill="var(--accent)"/></svg>
+      PresenterEval
+    </h1>
+    <p id="net" class="net" role="status" data-state="sync"><span class="dot" aria-hidden="true"></span><span id="netText">Starting</span></p>
+    <p class="clockbox" id="clockbox">
+      <output id="clock" class="clock" aria-label="Elapsed report time">0:00</output>
+      <span id="clockOf" class="clock-of">of 10:00</span>
+    </p>
+    <button id="flagBtn" class="btn btn-flag" type="button" aria-keyshortcuts="F">Flag moment <kbd aria-hidden="true">F</kbd></button>
+    <button id="helpBtn" class="btn btn-ghost" type="button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-keyshortcuts="Shift+/"><span class="lbltext">Shortcuts</span> <kbd aria-hidden="true">?</kbd></button>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <section class="panel session" aria-labelledby="sess-h">
+    <div class="head">
+      <h2 id="sess-h">Report</h2>
+      <p id="draftState" class="draftstate">Your draft saves on this device as you go.</p>
+    </div>
+    <form id="details" class="fields" novalidate>
+      <p><label class="lbl" for="presenter">Presenter</label><input type="text" id="presenter" autocomplete="off" required placeholder="e.g. Maria Santos"></p>
+      <p><label class="lbl" for="topic">Report topic</label><input type="text" id="topic" autocomplete="off" placeholder="e.g. ITIL incident management"></p>
+      <p><label class="lbl" for="evaluator">Your name</label><input type="text" id="evaluator" autocomplete="name" placeholder="Evaluator"></p>
+      <p><label class="lbl" for="allotted">Allotted time (minutes)</label><input type="number" id="allotted" inputmode="numeric" min="1" max="180" step="1" value="10"></p>
+    </form>
+    <div class="clockrow">
+      <button id="startBtn" class="btn btn-primary" type="button" aria-keyshortcuts="S">Start report <kbd aria-hidden="true">S</kbd></button>
+      <button id="resetBtn" class="btn btn-ghost" type="button">Reset clock</button>
+      <p class="muted small">Flagging a moment starts the clock if it isn't running.</p>
+    </div>
+    <figure class="timeline" id="timeline">
+      <figcaption class="sr-only">Report timeline. Each flag is a button that jumps to its note.</figcaption>
+      <ol id="tlMarks" class="tl-marks" aria-label="Flags on the timeline"></ol>
+      <span id="tlLimit" class="tl-limit" hidden></span>
+      <progress id="tlProg" max="600" value="0" aria-label="Time used of the report"></progress>
+      <p class="tl-scale" aria-hidden="true"><span id="sc0">0:00</span><span id="sc1">5:00</span><span id="sc2">10:00</span></p>
+    </figure>
+    <div class="groups">
+      <fieldset class="group" id="quickGroup">
+        <legend>Quick flags · Shift + 1 to 5</legend>
+      </fieldset>
+      <fieldset class="group">
+        <legend>Voice and video notes</legend>
+        <button id="audioBtn" class="btn btn-sm rec-btn" type="button" aria-pressed="false" aria-keyshortcuts="A">Record audio note <kbd aria-hidden="true">A</kbd></button>
+        <button id="videoBtn" class="btn btn-sm rec-btn" type="button" aria-pressed="false" aria-keyshortcuts="V">Record video note <kbd aria-hidden="true">V</kbd></button>
+        <output id="recStatus" class="recstatus"></output>
+        <video id="preview" class="preview" muted playsinline hidden></video>
+        <p id="recFallback" class="fallback" hidden>
+          <span id="recWhy"></span>
+          <label for="recFile">Attach a recording instead</label>
+          <input type="file" id="recFile" accept="audio/*,video/*" capture>
+        </p>
+      </fieldset>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="rubric" id="rubric" aria-labelledby="rub-h" tabindex="-1">
+      <div class="head">
+        <h2 id="rub-h">Rubric</h2>
+        <p class="muted small">Keys 1 to 5 rate the highlighted criterion · J and K move between criteria</p>
+      </div>
+      <form id="rubricForm" class="crits" novalidate>
+        <article class="crit">
+          <p><label class="lbl" for="overall">Overall feedback</label>
+          <textarea id="overall" rows="3" placeholder="Strongest point, one thing to improve"></textarea></p>
+        </article>
+      </form>
+    </section>
+
+    <aside class="panel score" aria-labelledby="score-h">
+      <h2 id="score-h">Weighted score</h2>
+      <p class="total"><output id="total" for="rubricForm">0</output><span class="of">/ 100</span></p>
+      <progress id="totalProg" max="100" value="0" aria-label="Weighted score out of 100"></progress>
+      <p id="totalNote" class="muted small">Rate a criterion to start scoring.</p>
+      <dl id="breakdown"></dl>
+      <dl>
+        <div><dt>Average rating</dt><dd><output id="avg">–</output></dd></div>
+        <div><dt>Criteria rated</dt><dd><output id="rated">0 of 4</output></dd></div>
+        <div><dt>Moments flagged</dt><dd><output id="flagCount">0</output></dd></div>
+        <div id="classRow" hidden><dt>Class average</dt><dd><output id="classAvg">–</output></dd></div>
+      </dl>
+      <p id="submitMsg" class="msg" hidden></p>
+      <button id="submitBtn" class="btn btn-primary btn-wide" type="button">Submit evaluation</button>
+      <button id="discardBtn" class="btn btn-ghost btn-wide" type="button">Clear this evaluation</button>
+    </aside>
+  </div>
+
+  <div class="cols">
+    <section class="panel" aria-labelledby="mom-h">
+      <div class="head"><h2 id="mom-h">Flagged moments</h2><p class="muted small">Esc leaves a note field</p></div>
+      <p id="momEmpty" class="empty">Press <kbd>F</kbd> or the Flag moment button while the presenter is talking. Each flag lands here with its timestamp so you can add a note later.</p>
+      <ol id="moments" class="list"></ol>
+    </section>
+
+    <section class="panel" aria-labelledby="saved-h">
+      <div class="head"><h2 id="saved-h" tabindex="-1">Saved evaluations</h2></div>
+      <ul id="savedList" class="list"></ul>
+      <p id="savedEmpty" class="empty" hidden>Submitted evaluations appear here with their sync status.</p>
+      <div class="tools">
+        <button id="csvBtn" class="btn btn-sm" type="button">Export CSV</button>
+        <button id="jsonBtn" class="btn btn-sm" type="button">Export JSON</button>
+        <label class="toggle"><input type="checkbox" id="simOffline"> Simulate network drop</label>
+      </div>
+    </section>
+  </div>
+  <p id="live" class="sr-only" aria-live="polite" aria-atomic="true"></p>
+</main>
+
+<dialog id="help" aria-labelledby="help-h">
+  <h2 id="help-h">Keyboard shortcuts</h2>
+  <table class="keys">
+    <tbody>
+      <tr><th scope="row"><kbd>F</kbd>, or <kbd>Space</kbd> / <kbd>Enter</kbd> on the page</th><td>Flag the current moment</td></tr>
+      <tr><th scope="row"><kbd>Shift</kbd> + <kbd>1</kbd> to <kbd>5</kbd></th><td id="presetKeys">Quick flags</td></tr>
+      <tr><th scope="row"><kbd>1</kbd> to <kbd>5</kbd></th><td>Rate the highlighted criterion</td></tr>
+      <tr><th scope="row"><kbd>J</kbd> / <kbd>K</kbd></th><td>Next / previous criterion</td></tr>
+      <tr><th scope="row"><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></th><td>Move between controls; arrows change a rating</td></tr>
+      <tr><th scope="row"><kbd>S</kbd></th><td>Start, pause or resume the report clock</td></tr>
+      <tr><th scope="row"><kbd>A</kbd> / <kbd>V</kbd></th><td>Start or stop an audio / video note</td></tr>
+      <tr><th scope="row"><kbd>Esc</kbd></th><td>Leave a note field, or close this panel</td></tr>
+      <tr><th scope="row"><kbd>?</kbd></th><td>Show this panel</td></tr>
+    </tbody>
+  </table>
+  <form method="dialog"><button class="btn btn-primary" type="submit">Close</button></form>
+</dialog>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- Config ---------- */
+// Optional: a server endpoint that accepts POSTed evaluation JSON (used when not running as a Claude artifact).
+const SYNC_ENDPOINT = "";
+
+const CRITERIA = [
+  { key: "clarity", name: "Clarity & Tone", weight: 30, levels: [
+    "Hard to follow; mumbled or monotone.",
+    "Often unclear; flat tone, many filler words.",
+    "Mostly clear; some filler words or rushed parts.",
+    "Clear, steady voice with good emphasis.",
+    "Crisp and confident; tone keeps the room engaged." ] },
+  { key: "visuals", name: "Visual Media Quality", weight: 25, levels: [
+    "Slides missing, unreadable, or off-topic.",
+    "Text-heavy, cluttered slides read aloud.",
+    "Readable slides with some clutter.",
+    "Clean slides that support what is said.",
+    "Visuals sharpen every key point." ] },
+  { key: "time", name: "Time Management", weight: 20, levels: [
+    "Far over or under time; ending cut off.",
+    "Noticeably off pace; key parts squeezed.",
+    "Close to time; pacing uneven.",
+    "On time with steady pacing.",
+    "Time used deliberately; strong close on schedule." ] },
+  { key: "qa", name: "Q&A Handling", weight: 25, levels: [
+    "Could not answer; deflected questions.",
+    "Partial answers, visibly unsure.",
+    "Answered most questions adequately.",
+    "Accurate answers backed by examples.",
+    "Confident, insightful answers that invite follow-up." ] }
+];
+const LEVEL_WORDS = ["Poor", "Weak", "Fair", "Good", "Excellent"];
+const PRESETS = [
+  { tag: "Pacing too fast", tone: "warn" },
+  { tag: "Great slide transition", tone: "good" },
+  { tag: "Unclear point", tone: "warn" },
+  { tag: "Strong eye contact", tone: "good" },
+  { tag: "Filler words", tone: "warn" }
+];
+
+/* ---------- Helpers ---------- */
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, "0");
+function fmt(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+const uid = (p) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const keyOf = (name) => (name || "").trim().toLowerCase().replace(/\s+/g, " ");
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return el;
+}
+function withTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+}
+
+/* ---------- Render batching (one write pass per frame) ---------- */
+const jobs = new Set(); let rafId = 0;
+function schedule(job) {
+  jobs.add(job);
+  if (!rafId) rafId = requestAnimationFrame(() => {
+    rafId = 0; const run = [...jobs]; jobs.clear(); run.forEach((j) => j());
+  });
+}
+
+/* ---------- Storage: IndexedDB with localStorage / memory fallback ---------- */
+const LS = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch {} }
+};
+let idbOK = false, idbConn = null;
+const memMedia = new Map();
+function idbOpen() {
+  return new Promise((res, rej) => {
+    if (!("indexedDB" in window)) return rej(new Error("no indexedDB"));
+    let r; try { r = indexedDB.open("presentereval", 1); } catch (e) { return rej(e); }
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      for (const n of ["drafts", "evals", "outbox", "media"]) if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: "id" });
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.onblocked = () => rej(new Error("blocked"));
+  });
+}
+function idbTx(storeName, mode, fn) {
+  return new Promise((res, rej) => {
+    let out; const t = idbConn.transaction(storeName, mode); const req = fn(t.objectStore(storeName));
+    if (req) req.onsuccess = () => { out = req.result; };
+    t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+  });
+}
+const store = {
+  async get(s, id) {
+    if (idbOK) try { return await idbTx(s, "readonly", (st) => st.get(id)); } catch {}
+    if (s === "media") return memMedia.get(id);
+    return (LS.get("pe:" + s) || {})[id];
+  },
+  async all(s) {
+    if (idbOK) try { return (await idbTx(s, "readonly", (st) => st.getAll())) || []; } catch {}
+    if (s === "media") return [...memMedia.values()];
+    return Object.values(LS.get("pe:" + s) || {});
+  },
+  async put(s, v) {
+    if (idbOK) try { await idbTx(s, "readwrite", (st) => st.put(v)); return; } catch {}
+    if (s === "media") { memMedia.set(v.id, v); return; }
+    const m = LS.get("pe:" + s) || {}; m[v.id] = v; LS.set("pe:" + s, m);
+  },
+  async del(s, id) {
+    if (idbOK) try { await idbTx(s, "readwrite", (st) => st.delete(id)); } catch {}
+    if (s === "media") { memMedia.delete(id); return; }
+    const m = LS.get("pe:" + s); if (m && id in m) { delete m[id]; LS.set("pe:" + s, m); }
+  }
+};
+
+/* ---------- State ---------- */
+function newState(prev) {
+  return {
+    id: uid("ev"), presenter: "", topic: "",
+    evaluator: prev ? prev.evaluator : "", allotted: prev ? prev.allotted : 10,
+    clock: { running: false, startedAt: 0, acc: 0 },
+    ratings: {}, weights: Object.fromEntries(CRITERIA.map((c) => [c.key, c.weight])),
+    comments: {}, overall: "", marks: [], createdAt: Date.now(), updatedAt: Date.now()
+  };
+}
+let state = newState();
+let evals = [];            // submitted evaluations (local)
+const outbox = new Set();  // ids waiting to sync
+let remoteEvals = [];      // from the shared class board, when available
+let activeKey = CRITERIA[0].key;
+const mediaURLs = new Map();
+
+const elapsed = () => state.clock.acc + (state.clock.running ? Date.now() - state.clock.startedAt : 0);
+const allottedMs = () => Math.max(1, Number(state.allotted) || 10) * 60000;
+
+function computeScore(ratings, weights) {
+  let got = 0, wRated = 0, wAll = 0, n = 0, sum = 0;
+  for (const c of CRITERIA) {
+    const w = Math.max(0, Number(weights[c.key]) || 0); wAll += w;
+    const r = ratings[c.key];
+    if (r) { got += (r / 5) * w; wRated += w; n++; sum += r; }
+  }
+  return {
+    total: wRated ? (got / wRated) * 100 : null,
+    avg: n ? sum / n : null, rated: n, wAll
+  };
+}
+
+/* ---------- Draft persistence ---------- */
+let saveTimer = 0;
+function dirty() {
+  state.updatedAt = Date.now();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveDraftNow, 300);
+}
+async function saveDraftNow() {
+  clearTimeout(saveTimer);
+  const rec = { id: "current", state, updatedAt: state.updatedAt };
+  LS.set("pe:draft", rec);
+  try { await store.put("drafts", clone(rec)); } catch {}
+  const t = new Date();
+  $("draftState").textContent = `Draft saved on this device at ${t.getHours()}:${pad(t.getMinutes())}:${pad(t.getSeconds())}.`;
+}
+
+/* ---------- Live announcements ---------- */
+const live = $("live");
+function announce(msg) {
+  live.textContent = "";
+  requestAnimationFrame(() => { live.textContent = msg; });
+}
+let scoreAnnTimer = 0;
+function announceScore(prefix) {
+  clearTimeout(scoreAnnTimer);
+  scoreAnnTimer = setTimeout(() => {
+    const s = computeScore(state.ratings, state.weights);
+    const tail = s.total == null ? "" : ` Weighted score ${s.total.toFixed(1)} of 100.`;
+    announce(`${prefix || ""}${tail}`.trim());
+  }, 500);
+}
+
+/* ---------- Rubric build ---------- */
+const rubricForm = $("rubricForm");
+const overallCard = rubricForm.firstElementChild;
+for (const c of CRITERIA) {
+  const pips = h("div", { class: "pips" },
+    [1, 2, 3, 4, 5].map((n) => h("label", { class: "pip" },
+      h("input", { type: "radio", name: "r-" + c.key, value: n, id: `r-${c.key}-${n}` }),
+      h("span", { class: "pip-n" }, n),
+      h("span", { class: "pip-w" }, LEVEL_WORDS[n - 1]))));
+  const art = h("article", { class: "crit", id: "crit-" + c.key, "data-key": c.key },
+    h("fieldset", { "aria-describedby": "desc-" + c.key },
+      h("legend", null, h("span", null, c.name), h("span", { class: "crit-w", id: "cw-" + c.key })),
+      pips,
+      h("p", { class: "desc", id: "desc-" + c.key }, "Not rated yet."),
+      c.key === "time" ? h("p", { class: "timefact", id: "timeFact" }, "Clock not started.") : null,
+      h("p", { class: "meterline" },
+        h("meter", { id: "m-" + c.key, min: 0, max: 5, low: 2.5, high: 3.5, optimum: 5, value: 0, "aria-label": c.name + " rating out of 5" }),
+        h("output", { id: "o-" + c.key }, "– / 5"))),
+    h("details", { id: "d-" + c.key },
+      h("summary", null, "Feedback and weight", h("span", { class: "has", id: "has-" + c.key })),
+      h("div", { class: "dbody" },
+        h("p", null, h("label", { class: "lbl", for: "c-" + c.key }, "Comment on " + c.name),
+          h("textarea", { id: "c-" + c.key, rows: 2, "data-key": c.key, "data-kind": "comment", placeholder: "What should they keep or change?" })),
+        h("p", null,
+          h("span", { class: "wline" },
+            h("label", { class: "lbl", for: "w-" + c.key }, "Weight"),
+            h("output", { id: "wo-" + c.key, for: "w-" + c.key, class: "mono small" })),
+          h("input", { type: "range", id: "w-" + c.key, min: 0, max: 50, step: 5, "data-key": c.key, "data-kind": "weight" })))));
+  rubricForm.insertBefore(art, overallCard);
+}
+const breakdown = $("breakdown");
+for (const c of CRITERIA) {
+  breakdown.append(h("div", null, h("dt", null, c.name),
+    h("dd", null, h("output", { id: "pts-" + c.key }, "–"), " ", h("span", { class: "muted", id: "max-" + c.key }))));
+}
+const quickGroup = $("quickGroup");
+PRESETS.forEach((p, i) => {
+  quickGroup.append(h("button", { type: "button", class: `btn btn-sm chipbtn tone-${p.tone}`, "data-preset": i, "aria-keyshortcuts": `Shift+${i + 1}` }, p.tag));
+});
+$("presetKeys").textContent = PRESETS.map((p, i) => `${i + 1} ${p.tag}`).join(", ");
+
+/* ---------- Render: form from state ---------- */
+function applyStateToForm() {
+  $("presenter").value = state.presenter;
+  $("topic").value = state.topic;
+  $("evaluator").value = state.evaluator;
+  $("allotted").value = state.allotted;
+  $("overall").value = state.overall;
+  for (const c of CRITERIA) {
+    const r = state.ratings[c.key];
+    rubricForm.querySelectorAll(`input[name="r-${c.key}"]`).forEach((i) => { i.checked = Number(i.value) === r; });
+    $("c-" + c.key).value = state.comments[c.key] || "";
+    $("w-" + c.key).value = state.weights[c.key];
+  }
+  $("tlMarks").replaceChildren(); $("moments").replaceChildren();
+  [...state.marks].sort((a, b) => a.t - b.t).forEach(addMarkNodes);
+  renderEmpty(); renderClock(true); renderScores(); renderClockButton(); setActive(activeKey);
+}
+
+function renderScores() {
+  const s = computeScore(state.ratings, state.weights);
+  for (const c of CRITERIA) {
+    const w = Math.max(0, Number(state.weights[c.key]) || 0);
+    const share = s.wAll ? (w / s.wAll) * 100 : 0;
+    const r = state.ratings[c.key];
+    $("cw-" + c.key).textContent = `${Math.round(share)}% of score`;
+    $("wo-" + c.key).value = `${w} pts · ${Math.round(share)}%`;
+    $("o-" + c.key).value = r ? `${r} / 5` : "– / 5";
+    $("m-" + c.key).value = r || 0;
+    const d = $("desc-" + c.key);
+    if (r) { d.replaceChildren(h("strong", null, LEVEL_WORDS[r - 1] + ". "), c.levels[r - 1]); }
+    else d.textContent = "Not rated yet.";
+    $("pts-" + c.key).value = r ? ((r / 5) * share).toFixed(1) : "–";
+    $("max-" + c.key).textContent = `/ ${share.toFixed(0)}`;
+    $("has-" + c.key).textContent = state.comments[c.key] ? "· has comment" : "";
+  }
+  $("total").value = s.total == null ? "0" : s.total.toFixed(1);
+  $("totalProg").value = s.total == null ? 0 : s.total;
+  $("totalNote").textContent = s.rated === 0 ? "Rate a criterion to start scoring."
+    : s.rated < CRITERIA.length ? `Projected from ${s.rated} of ${CRITERIA.length} criteria. Unrated ones don't count yet.`
+    : "All criteria rated.";
+  $("avg").value = s.avg == null ? "–" : `${s.avg.toFixed(2)} / 5`;
+  $("rated").value = `${s.rated} of ${CRITERIA.length}`;
+  $("flagCount").value = String(state.marks.length);
+  renderClassAvg();
+}
+
+function renderClassAvg() {
+  const row = $("classRow");
+  if (adapterKind !== "board") { row.hidden = true; return; }
+  row.hidden = false;
+  const k = keyOf(state.presenter);
+  if (!k) { $("classAvg").value = "Enter a presenter"; return; }
+  const mine = remoteEvals.filter((e) => e.presenterKey === k && typeof e.total === "number");
+  $("classAvg").value = mine.length
+    ? `${(mine.reduce((a, e) => a + e.total, 0) / mine.length).toFixed(1)} · ${mine.length} eval${mine.length > 1 ? "s" : ""}`
+    : "None synced yet";
+}
+
+/* ---------- Clock + timeline ---------- */
+let lastSec = -1, lastScale = 0;
+function renderClock(force) {
+  const el = elapsed(); const sec = Math.floor(el / 1000);
+  if (!force && sec === lastSec) return;
+  lastSec = sec;
+  const lim = allottedMs(); const over = el - lim;
+  $("clock").value = fmt(el);
+  $("clockOf").textContent = over > 0 ? `+${fmt(over)} over` : `of ${fmt(lim)}`;
+  const box = $("clockbox");
+  box.classList.toggle("is-over", over > 0);
+  box.classList.toggle("is-running", state.clock.running);
+  const scale = Math.max(lim, el);
+  const prog = $("tlProg");
+  prog.max = Math.round(scale / 1000); prog.value = Math.min(sec, prog.max);
+  $("timeline").classList.toggle("is-over", over > 0);
+  if (scale !== lastScale) {
+    lastScale = scale;
+    $("tlMarks").style.setProperty("--scale", scale);
+    $("sc1").textContent = fmt(scale / 2); $("sc2").textContent = fmt(scale);
+    const limEl = $("tlLimit");
+    limEl.hidden = over <= 0;
+    limEl.style.left = `${(lim / scale) * 100}%`;
+  }
+  const tf = $("timeFact");
+  if (tf) tf.textContent = el === 0 ? `Clock not started · allotted ${fmt(lim)}.`
+    : over > 0 ? `Ran ${fmt(el)} of ${fmt(lim)} · ${fmt(over)} over.`
+    : `${fmt(el)} of ${fmt(lim)} used · ${fmt(lim - el)} left.`;
+  if (rec) $("recStatus").value = `Recording ${rec.kind} note · ${fmt(Date.now() - rec.startedAt)}. Press ${rec.kind === "audio" ? "A" : "V"} to stop.`;
+}
+setInterval(() => renderClock(false), 200);
+
+function renderClockButton() {
+  const b = $("startBtn");
+  const label = state.clock.running ? "Pause" : elapsed() > 0 ? "Resume" : "Start report";
+  b.firstChild.textContent = label + " ";
+}
+function startClock() {
+  if (state.clock.running) return;
+  state.clock.running = true; state.clock.startedAt = Date.now();
+  renderClockButton(); renderClock(true); dirty();
+}
+function toggleClock() {
+  if (state.clock.running) {
+    state.clock.acc += Date.now() - state.clock.startedAt; state.clock.running = false;
+    announce(`Clock paused at ${fmt(elapsed())}.`);
+  } else { startClock(); announce(`Clock running from ${fmt(elapsed())}.`); }
+  renderClockButton(); renderClock(true); dirty();
+}
+
+/* ---------- Marks (flags, notes, media) ---------- */
+function addMarkNodes(m) {
+  const tl = $("tlMarks");
+  const label = `${fmt(m.t)} ${m.tag}`;
+  const tlItem = h("li", { class: `tl-mark tone-${m.tone}`, id: "tl-" + m.id, style: `--t:${m.t}` },
+    h("button", { type: "button", "data-mark": m.id, "aria-label": `${label}. Go to note.` },
+      h("span", { class: "tl-tip", "aria-hidden": "true" }, label)));
+  insertSorted(tl, tlItem, m.t);
+
+  const media = m.mediaId ? mediaNode(m) : null;
+  const item = h("li", { class: `moment tone-${m.tone}`, id: "mo-" + m.id, "data-t": m.t },
+    h("article", { "aria-labelledby": "mt-" + m.id },
+      h("header", null,
+        h("time", { class: "stamp", datetime: `PT${Math.floor(m.t / 1000)}S` }, fmt(m.t)),
+        h("span", { class: "tag", id: "mt-" + m.id }, m.tag),
+        h("button", { type: "button", class: "linkbtn", "data-del": m.id, "aria-label": `Delete ${label}` }, "Delete")),
+      h("label", { class: "sr-only", for: "note-" + m.id }, `Note for ${label}`),
+      h("textarea", { id: "note-" + m.id, rows: 1, "data-note": m.id, placeholder: "Add a note (optional)" }),
+      media));
+  insertSorted($("moments"), item, m.t);
+  item.querySelector("textarea").value = m.note || "";
+}
+function insertSorted(list, node, t) {
+  for (const li of list.children) {
+    const lt = Number(li.dataset.t ?? li.style.getPropertyValue("--t"));
+    if (lt > t) { list.insertBefore(node, li); return; }
+  }
+  list.append(node);
+}
+function mediaNode(m) {
+  const kind = m.mediaKind === "video" ? "video" : "audio";
+  const el = h(kind, { controls: true, preload: "metadata", playsinline: kind === "video" ? true : null, "aria-label": `${kind === "video" ? "Video" : "Audio"} note at ${fmt(m.t)}` });
+  getMediaURL(m.mediaId).then((u) => { if (u) el.src = u; else el.replaceWith(h("p", { class: "muted small" }, "Recording not available on this device.")); });
+  const wrap = h("p", { style: "display:grid;gap:6px" }, el);
+  const save = h("button", { type: "button", class: "linkbtn", style: "justify-self:start" }, "Save recording");
+  save.addEventListener("click", () => saveMedia(m));
+  wrap.append(save);
+  return wrap;
+}
+async function getMediaURL(id) {
+  if (mediaURLs.has(id)) return mediaURLs.get(id);
+  const rec = await store.get("media", id);
+  if (!rec || !rec.blob) return null;
+  const u = URL.createObjectURL(rec.blob); mediaURLs.set(id, u); return u;
+}
+function renderEmpty() { $("momEmpty").hidden = state.marks.length > 0; }
+
+function flag(preset) {
+  if (!state.clock.running && elapsed() === 0) startClock();
+  const m = { id: uid("m"), t: elapsed(), tag: preset ? preset.tag : "Flagged moment", tone: preset ? preset.tone : "neutral", note: "" };
+  state.marks.push(m);
+  addMarkNodes(m); renderEmpty(); schedule(renderScores); dirty();
+  const fb = $("flagBtn"); fb.classList.remove("flash"); void fb.offsetWidth; fb.classList.add("flash");
+  announce(`Flagged ${fmt(m.t)}: ${m.tag}.`);
+  return m;
+}
+async function deleteMark(id) {
+  const i = state.marks.findIndex((m) => m.id === id); if (i < 0) return;
+  const [m] = state.marks.splice(i, 1);
+  $("tl-" + id)?.remove(); $("mo-" + id)?.remove();
+  if (m.mediaId) { await store.del("media", m.mediaId); const u = mediaURLs.get(m.mediaId); if (u) { URL.revokeObjectURL(u); mediaURLs.delete(m.mediaId); } }
+  renderEmpty(); schedule(renderScores); dirty();
+  announce(`Deleted ${fmt(m.t)} ${m.tag}.`);
+  $("flagBtn").focus();
+}
+function focusMark(id) {
+  const li = $("mo-" + id); if (!li) return;
+  document.querySelectorAll(".moment.is-focus").forEach((n) => n.classList.remove("is-focus"));
+  li.classList.add("is-focus");
+  li.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  li.querySelector("textarea").focus({ preventScroll: true });
+}
+
+/* ---------- Recording (MediaRecorder) ---------- */
+let rec = null;
+function pickMime(kind) {
+  if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return "";
+  const list = kind === "video"
+    ? ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]
+    : ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  return list.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+}
+function showFallback(why) {
+  $("recWhy").textContent = why;
+  $("recFallback").hidden = false;
+  announce(why + " You can attach a recording instead.");
+}
+function setRecButtons() {
+  for (const kind of ["audio", "video"]) {
+    const b = $(kind + "Btn"); const on = rec && rec.kind === kind;
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.firstChild.textContent = (on ? `Stop ${kind} note` : `Record ${kind} note`) + " ";
+  }
+}
+async function toggleRec(kind) {
+  if (rec) { const same = rec.kind === kind; stopRec(); if (same) return; await sleep(150); }
+  if (!window.isSecureContext) return showFallback("Recording needs a secure page (https or localhost).");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return showFallback("This browser can't record from here.");
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(kind === "video"
+      ? { audio: true, video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } } }
+      : { audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    const name = e && e.name;
+    return showFallback(name === "NotAllowedError" || name === "SecurityError"
+      ? `${kind === "video" ? "Camera" : "Microphone"} access is blocked on this page.`
+      : name === "NotFoundError" ? `No ${kind === "video" ? "camera" : "microphone"} was found.`
+      : "Recording couldn't start.");
+  }
+  if (!state.clock.running && elapsed() === 0) startClock();
+  const mimeType = pickMime(kind);
+  let mr;
+  try {
+    mr = new MediaRecorder(stream, mimeType
+      ? { mimeType, audioBitsPerSecond: 64000, videoBitsPerSecond: kind === "video" ? 700000 : undefined }
+      : undefined);
+  } catch { stream.getTracks().forEach((t) => t.stop()); return showFallback("Recording couldn't start."); }
+  rec = { kind, mr, stream, chunks: [], t: elapsed(), startedAt: Date.now() };
+  const mine = rec;
+  mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) mine.chunks.push(ev.data); };
+  mr.onstop = () => finishRec(mine);
+  mr.start(1000);
+  if (kind === "video") { const p = $("preview"); p.srcObject = stream; p.hidden = false; p.play().catch(() => {}); }
+  $("recStatus").classList.add("is-live");
+  setRecButtons(); renderClock(true);
+  announce(`Recording ${kind} note at ${fmt(rec.t)}.`);
+}
+function stopRec() {
+  if (!rec) return;
+  try { rec.mr.state !== "inactive" && rec.mr.stop(); } catch { finishRec(rec); }
+}
+async function finishRec(r) {
+  r.stream.getTracks().forEach((t) => t.stop());
+  const p = $("preview"); p.srcObject = null; p.hidden = true;
+  if (rec === r) rec = null;
+  $("recStatus").classList.remove("is-live"); $("recStatus").value = "";
+  setRecButtons();
+  const blob = new Blob(r.chunks, { type: r.mr.mimeType || (r.chunks[0] && r.chunks[0].type) || (r.kind === "video" ? "video/webm" : "audio/webm") });
+  if (!blob.size) { announce("Recording was empty and wasn't saved."); return; }
+  await attachMedia(blob, r.kind, r.t, r.kind === "video" ? "Video note" : "Audio note", Date.now() - r.startedAt);
+}
+async function attachMedia(blob, kind, t, tag, durMs) {
+  const id = uid("md");
+  await store.put("media", { id, blob, type: blob.type, kind, size: blob.size });
+  const m = { id: uid("m"), t, tag, tone: "media", note: "", mediaId: id, mediaKind: kind, mediaDur: durMs || 0 };
+  state.marks.push(m); addMarkNodes(m); renderEmpty(); schedule(renderScores); dirty(); saveDraftNow();
+  announce(`${tag} saved at ${fmt(t)}${durMs ? `, ${fmt(durMs)} long` : ""}.`);
+}
+
+/* ---------- Export / downloads ---------- */
+let dlP = null;
+function getDownloads() {
+  if (dlP) return dlP;
+  dlP = (async () => {
+    await waitForClaude();
+    if (!window.claude || typeof window.claude.use !== "function") return null;
+    try { return await Promise.race([window.claude.use("downloads"), sleep(8000).then(() => null)]); } catch { return null; }
+  })();
+  return dlP;
+}
+async function saveFile(name, data, mime) {
+  const d = await getDownloads();
+  if (d) {
+    try { await d.save({ filename: name, data }); announce(`Saved ${name}.`); }
+    catch (e) { if (!e || e.code !== "declined") announce(`Couldn't save ${name}. ${e && e.message ? e.message : ""}`); }
+    return;
+  }
+  const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  announce(`Saved ${name}.`);
+}
+async function saveMedia(m) {
+  const r = await store.get("media", m.mediaId); if (!r) return;
+  const ext = /mp4/.test(r.type) ? "mp4" : "webm";
+  await saveFile(`${m.mediaKind}-note-${fmt(m.t).replace(/:/g, "m")}s.${ext}`, r.blob, r.type);
+}
+function exportRows() { return evals.filter((e) => !e.example).sort((a, b) => a.submittedAt - b.submittedAt); }
+function csvCell(v) { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function toCSV() {
+  const head = ["submitted_at", "presenter", "topic", "evaluator", "duration", "allotted_min",
+    ...CRITERIA.map((c) => c.key + "_rating"), ...CRITERIA.map((c) => c.key + "_weight"),
+    "weighted_score", "average_rating", "flags", "flag_log", "overall_feedback"];
+  const rows = exportRows().map((e) => [
+    new Date(e.submittedAt).toISOString(), e.presenter, e.topic, e.evaluator, fmt(e.duration), e.allotted,
+    ...CRITERIA.map((c) => e.ratings[c.key] || ""), ...CRITERIA.map((c) => e.weights[c.key]),
+    e.total.toFixed(1), e.avg.toFixed(2), e.marks.length,
+    e.marks.map((m) => `${fmt(m.t)} ${m.tag}${m.note ? ": " + m.note : ""}`).join(" | "), e.overall]);
+  return [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+
+/* ---------- Sync: outbox + adapters ---------- */
+let adapterP = null, adapterKind = "pending", flushing = false, failStreak = 0, retryTimer = 0;
+async function waitForClaude() {
+  for (let i = 0; i < 15 && !window.claude; i++) await sleep(100);
+}
+function getAdapter() {
+  if (adapterP) return adapterP;
+  adapterP = (async () => {
+    await waitForClaude();
+    if (window.claude && typeof window.claude.use === "function") {
+      try {
+        const db = await Promise.race([window.claude.use("db"), sleep(10000).then(() => null)]);
+        if (db) {
+          const col = db.collection("evaluations");
+          adapterKind = "board";
+          col.onSnapshot((snap) => {
+            remoteEvals = snap.docs.filter((d) => d.exists).map((d) => d.data());
+            const ids = new Set(remoteEvals.map((e) => e.id));
+            let changed = false;
+            for (const e of evals) if (!e.synced && ids.has(e.id) && !outbox.has(e.id)) { e.synced = true; changed = true; }
+            if (changed) renderSaved();
+            schedule(renderClassAvg);
+          }, () => { remoteEvals = []; schedule(renderClassAvg); });
+          return { push: (r) => col.doc(r.id).set(r) };
+        }
+      } catch {}
+    }
+    if (SYNC_ENDPOINT) {
+      adapterKind = "endpoint";
+      return { push: async (r) => {
+        const res = await fetch(SYNC_ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(r) });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+      } };
+    }
+    adapterKind = "none";
+    return null;
+  })();
+  adapterP.then(() => { renderNet(); renderSaved(); schedule(renderScores); });
+  return adapterP;
+}
+const forcedOffline = () => $("simOffline").checked;
+const isOnline = () => navigator.onLine && !forcedOffline();
+function toRemote(e) {
+  return clone({
+    id: e.id, app: "PresenterEval/1", presenter: e.presenter, presenterKey: keyOf(e.presenter), topic: e.topic,
+    evaluator: e.evaluator, allotted: e.allotted, duration: e.duration,
+    ratings: e.ratings, weights: e.weights, comments: e.comments, overall: e.overall,
+    marks: e.marks.map((m) => ({ id: m.id, t: m.t, tag: m.tag, tone: m.tone, note: m.note || "", media: m.mediaKind || null })),
+    total: e.total, avg: e.avg, submittedAt: e.submittedAt
+  });
+}
+async function flush() {
+  if (flushing) return;
+  if (!isOnline() || outbox.size === 0) { renderNet(); return; }
+  const adapter = await getAdapter();
+  if (!adapter || !isOnline()) { renderNet(); return; }
+  flushing = true; renderNet();
+  let failed = 0;
+  for (const id of [...outbox]) {
+    if (!isOnline()) { failed++; break; }
+    const e = evals.find((x) => x.id === id);
+    if (!e) { outbox.delete(id); await store.del("outbox", id); continue; }
+    try {
+      await withTimeout(adapter.push(toRemote(e)), 15000);
+      e.synced = true; e.syncedAt = Date.now();
+      outbox.delete(id);
+      await store.put("evals", e); await store.del("outbox", id);
+      renderSaved();
+    } catch { failed++; }
+  }
+  flushing = false;
+  clearTimeout(retryTimer);
+  if (failed && isOnline()) {
+    failStreak++;
+    retryTimer = setTimeout(flush, Math.min(60000, 4000 * 2 ** (failStreak - 1)));
+  } else if (!failed) failStreak = 0;
+  renderNet();
+  if (!failed && outbox.size === 0 && adapterKind !== "none") announce("All evaluations synced.");
+}
+function renderNet() {
+  const el = $("net"), n = outbox.size;
+  let s, t;
+  if (!isOnline()) { s = "offline"; t = `Offline · saving on this device${n ? ` · ${n} to sync` : ""}`; }
+  else if (flushing) { s = "sync"; t = `Syncing ${n} evaluation${n === 1 ? "" : "s"}`; }
+  else if (adapterKind === "pending") { s = "sync"; t = "Connecting"; }
+  else if (adapterKind === "none") { s = "ok"; t = "Online · saved on this device"; }
+  else if (n) { s = "warn"; t = `Online · ${n} waiting to sync`; }
+  else { s = "ok"; t = "Online · all synced"; }
+  if (el.dataset.state !== s || $("netText").textContent !== t) { el.dataset.state = s; $("netText").textContent = t; }
+}
+window.addEventListener("online", () => { failStreak = 0; renderNet(); flush(); });
+window.addEventListener("offline", renderNet);
+setInterval(() => { if (outbox.size && !flushing) flush(); }, 30000);
+
+/* ---------- Submit / saved list ---------- */
+function showMsg(text, ok) {
+  const m = $("submitMsg"); m.textContent = text; m.classList.toggle("ok", !!ok); m.hidden = !text;
+  if (text) m.setAttribute("role", ok ? "status" : "alert");
+}
+async function submit() {
+  if (!state.presenter.trim()) { showMsg("Add the presenter's name before submitting."); $("presenter").focus(); return; }
+  const missing = CRITERIA.filter((c) => !state.ratings[c.key]);
+  if (missing.length) {
+    showMsg(`Rate ${missing.map((c) => c.name).join(", ")} before submitting.`);
+    setActive(missing[0].key, true); return;
+  }
+  if (rec) { stopRec(); await sleep(400); }
+  const s = computeScore(state.ratings, state.weights);
+  const e = clone(state);
+  e.duration = elapsed(); delete e.clock;
+  e.total = s.total; e.avg = s.avg; e.submittedAt = Date.now(); e.synced = false;
+  evals.push(e); outbox.add(e.id);
+  await store.put("evals", e); await store.put("outbox", { id: e.id, at: Date.now() });
+  const name = e.presenter;
+  state = newState(state);
+  await saveDraftNow();
+  applyStateToForm(); renderSaved();
+  showMsg(`Saved ${name}: ${e.total.toFixed(1)} / 100.`, true);
+  announce(`Evaluation for ${name} saved with a weighted score of ${e.total.toFixed(1)}.`);
+  $("presenter").focus();
+  flush();
+}
+function savedState(e) {
+  if (e.example) return ["example", "Example"];
+  if (e.synced) return ["synced", "Synced"];
+  if (adapterKind === "none") return ["local", "On this device"];
+  return ["pending", "Waiting to sync"];
+}
+function renderSaved() {
+  const list = $("savedList");
+  const sorted = [...evals].sort((a, b) => b.submittedAt - a.submittedAt);
+  $("savedEmpty").hidden = sorted.length > 0;
+  list.replaceChildren(...sorted.map((e) => {
+    const [code, label] = savedState(e);
+    const d = new Date(e.submittedAt);
+    const when = `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.getHours()}:${pad(d.getMinutes())}`;
+    const del = h("button", { type: "button", class: "linkbtn", "data-delsaved": e.id, "aria-label": `Delete evaluation for ${e.presenter}` }, "Delete");
+    return h("li", { class: "saved" }, h("article", { "aria-label": `Evaluation for ${e.presenter}` },
+      h("div", null, h("h3", null, e.presenter), h("p", { class: "meta" }, [e.topic, when, e.evaluator ? "by " + e.evaluator : ""].filter(Boolean).join(" · "))),
+      h("p", { class: "pts" }, e.total.toFixed(1), h("span", null, " /100")),
+      h("p", { class: "row" }, h("span", { class: "pill", "data-s": code }, label),
+        h("span", { class: "muted small" }, `Ran ${fmt(e.duration)} of ${e.allotted} min · ${e.marks.length} flag${e.marks.length === 1 ? "" : "s"}`), del),
+      h("details", null, h("summary", null, "Ratings and moments"),
+        h("div", { class: "dbody" },
+          h("dl", null, CRITERIA.map((c) => h("div", null, h("dt", null, c.name),
+            h("dd", null, `${e.ratings[c.key] || "–"} / 5`)))),
+          e.overall ? h("p", { class: "small" }, e.overall) : null,
+          e.marks.length ? h("ol", null, [...e.marks].sort((a, b) => a.t - b.t).map((m) =>
+            h("li", null, h("span", { class: "mono" }, fmt(m.t)), " ", h("strong", null, m.tag), m.note ? ` · ${m.note}` : ""))) : null))));
+  }));
+}
+
+/* ---------- Active criterion ---------- */
+function setActive(key, focus) {
+  activeKey = key;
+  for (const c of CRITERIA) $("crit-" + c.key).classList.toggle("is-active", c.key === key);
+  if (focus) {
+    const art = $("crit-" + key);
+    const target = art.querySelector("input[type=radio]:checked") || art.querySelector("input[type=radio]");
+    target.focus();
+  }
+}
+function moveCrit(dir) {
+  const i = CRITERIA.findIndex((c) => c.key === activeKey);
+  const n = CRITERIA[(i + dir + CRITERIA.length) % CRITERIA.length];
+  setActive(n.key, true);
+  announce(`${n.name}${state.ratings[n.key] ? `, rated ${state.ratings[n.key]}` : ", not rated"}.`);
+}
+function rate(key, n, viaKey) {
+  state.ratings[key] = n;
+  const input = $(`r-${key}-${n}`); if (input) input.checked = true;
+  schedule(renderScores); dirty();
+  const c = CRITERIA.find((x) => x.key === key);
+  announceScore(viaKey ? `${c.name}: ${n}, ${LEVEL_WORDS[n - 1]}.` : "");
+}
+
+/* ---------- Events ---------- */
+$("details").addEventListener("submit", (e) => e.preventDefault());
+rubricForm.addEventListener("submit", (e) => e.preventDefault());
+$("details").addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.id === "allotted") {
+    const v = Math.round(Number(t.value)); if (!v || v < 1) return;
+    state.allotted = Math.min(180, v); renderClock(true);
+  } else state[t.id] = t.value;
+  if (t.id === "presenter") schedule(renderClassAvg);
+  dirty();
+});
+rubricForm.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.type === "radio") rate(t.name.slice(2), Number(t.value), false);
+});
+rubricForm.addEventListener("input", (e) => {
+  const t = e.target, k = t.dataset.key;
+  if (t.id === "overall") { state.overall = t.value; dirty(); return; }
+  if (t.dataset.kind === "comment") { state.comments[k] = t.value; dirty(); schedule(renderScores); }
+  if (t.dataset.kind === "weight") { state.weights[k] = Number(t.value); dirty(); schedule(renderScores); announceScore(""); }
+});
+rubricForm.addEventListener("focusin", (e) => {
+  const art = e.target.closest(".crit[data-key]"); if (art) setActive(art.dataset.key);
+});
+rubricForm.addEventListener("pointerdown", (e) => {
+  const art = e.target.closest(".crit[data-key]"); if (art) setActive(art.dataset.key);
+});
+$("flagBtn").addEventListener("click", () => flag());
+quickGroup.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-preset]"); if (b) flag(PRESETS[Number(b.dataset.preset)]);
+});
+$("startBtn").addEventListener("click", toggleClock);
+let resetArm = 0;
+$("resetBtn").addEventListener("click", (e) => {
+  const b = e.currentTarget;
+  if (!resetArm) {
+    b.textContent = "Confirm reset"; b.classList.add("is-confirm");
+    resetArm = setTimeout(() => { resetArm = 0; b.textContent = "Reset clock"; b.classList.remove("is-confirm"); }, 4000);
+    announce("Press again to reset the clock to zero. Flags keep their times.");
+    return;
+  }
+  clearTimeout(resetArm); resetArm = 0; b.textContent = "Reset clock"; b.classList.remove("is-confirm");
+  state.clock = { running: false, startedAt: 0, acc: 0 }; lastScale = 0;
+  renderClockButton(); renderClock(true); dirty(); announce("Clock reset to 0:00.");
+});
+$("audioBtn").addEventListener("click", () => toggleRec("audio"));
+$("videoBtn").addEventListener("click", () => toggleRec("video"));
+$("recFile").addEventListener("change", async (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  await attachMedia(f, f.type.startsWith("video") ? "video" : "audio", elapsed(), "Attached recording", 0);
+  e.target.value = "";
+});
+$("tlMarks").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-mark]"); if (b) focusMark(b.dataset.mark);
+});
+$("moments").addEventListener("input", (e) => {
+  const id = e.target.dataset.note; if (!id) return;
+  const m = state.marks.find((x) => x.id === id); if (m) { m.note = e.target.value; dirty(); }
+});
+$("moments").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  if (b.dataset.armed) { deleteMark(b.dataset.del); return; }
+  b.dataset.armed = "1"; b.textContent = "Confirm delete"; b.classList.add("is-confirm");
+  setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Delete"; b.classList.remove("is-confirm"); } }, 4000);
+});
+$("moments").addEventListener("focusout", (e) => {
+  const li = e.target.closest(".moment"); if (li && !li.contains(e.relatedTarget)) li.classList.remove("is-focus");
+});
+$("savedList").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-delsaved]"); if (!b) return;
+  if (!b.dataset.armed) {
+    b.dataset.armed = "1"; b.textContent = "Confirm delete"; b.classList.add("is-confirm");
+    setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Delete"; b.classList.remove("is-confirm"); } }, 4000);
+    return;
+  }
+  const id = b.dataset.delsaved;
+  const e2 = evals.find((x) => x.id === id);
+  evals = evals.filter((x) => x.id !== id); outbox.delete(id);
+  await store.del("evals", id); await store.del("outbox", id);
+  if (e2) for (const m of e2.marks) if (m.mediaId) await store.del("media", m.mediaId);
+  renderSaved(); renderNet();
+  announce("Evaluation deleted from this device.");
+  $("saved-h").focus();
+});
+$("submitBtn").addEventListener("click", submit);
+let discardArm = 0;
+$("discardBtn").addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  if (!discardArm) {
+    b.textContent = "Confirm: clear ratings, flags and notes"; b.classList.add("is-confirm");
+    discardArm = setTimeout(() => { discardArm = 0; b.textContent = "Clear this evaluation"; b.classList.remove("is-confirm"); }, 4000);
+    return;
+  }
+  clearTimeout(discardArm); discardArm = 0; b.textContent = "Clear this evaluation"; b.classList.remove("is-confirm");
+  if (rec) stopRec();
+  for (const m of state.marks) if (m.mediaId) await store.del("media", m.mediaId);
+  state = newState(state); applyStateToForm(); await saveDraftNow(); showMsg("");
+  announce("Evaluation cleared.");
+});
+$("csvBtn").addEventListener("click", () => {
+  if (!exportRows().length) { announce("Nothing to export yet. Submit an evaluation first."); return; }
+  saveFile(`presentereval-${today()}.csv`, toCSV(), "text/csv");
+});
+$("jsonBtn").addEventListener("click", () => {
+  if (!exportRows().length) { announce("Nothing to export yet. Submit an evaluation first."); return; }
+  const data = { app: "PresenterEval", exportedAt: new Date().toISOString(), criteria: CRITERIA.map(({ key, name }) => ({ key, name })), evaluations: exportRows().map(toRemote) };
+  saveFile(`presentereval-${today()}.json`, JSON.stringify(data, null, 2), "application/json");
+});
+$("simOffline").addEventListener("change", (e) => {
+  renderNet();
+  announce(e.target.checked ? "Network drop simulated. Everything keeps saving on this device." : "Network restored. Syncing.");
+  if (!e.target.checked) { failStreak = 0; flush(); }
+});
+const help = $("help");
+$("helpBtn").addEventListener("click", () => help.showModal());
+
+function isTyping(t) {
+  if (!t || !t.tagName) return false;
+  if (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return true;
+  return t.tagName === "INPUT" && !["radio", "checkbox", "range", "button", "submit", "file", "reset"].includes(t.type);
+}
+function isInteractive(t) {
+  return !!(t && t.closest && t.closest("button,a[href],input,textarea,select,summary,label,video,audio,[contenteditable],dialog"));
+}
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+  if (help.open) return;
+  const t = e.target;
+  if (isTyping(t)) {
+    if (e.key === "Escape") {
+      const m = t.closest(".moment, .crit, #details");
+      if (m) { e.preventDefault(); t.blur(); $("flagBtn").focus(); }
+    }
+    return;
+  }
+  if (e.shiftKey && /^Digit[1-5]$/.test(e.code)) { e.preventDefault(); flag(PRESETS[Number(e.code.slice(5)) - 1]); return; }
+  if (e.key === "?") { e.preventDefault(); help.showModal(); return; }
+  if (!e.shiftKey && /^[1-5]$/.test(e.key)) { e.preventDefault(); rate(activeKey, Number(e.key), true); return; }
+  if ((e.key === " " || e.key === "Enter") && !isInteractive(t)) { e.preventDefault(); flag(); return; }
+  if (e.shiftKey || e.repeat) return;
+  switch (e.key.toLowerCase()) {
+    case "f": e.preventDefault(); flag(); break;
+    case "j": e.preventDefault(); moveCrit(1); break;
+    case "k": e.preventDefault(); moveCrit(-1); break;
+    case "s": e.preventDefault(); toggleClock(); break;
+    case "a": e.preventDefault(); toggleRec("audio"); break;
+    case "v": e.preventDefault(); toggleRec("video"); break;
+  }
+});
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveDraftNow(); });
+window.addEventListener("pagehide", () => { saveDraftNow(); });
+
+// Keep the sticky score rail clear of the top bar.
+const bar = $("bar");
+if ("ResizeObserver" in window) new ResizeObserver(() => document.documentElement.style.setProperty("--bar-h", bar.offsetHeight + "px")).observe(bar);
+
+/* ---------- Boot ---------- */
+function exampleEval() {
+  const e = newState();
+  Object.assign(e, {
+    id: "ev-example", example: true, presenter: "Maria Santos", topic: "ITIL incident management", evaluator: "Example",
+    allotted: 10, duration: 642000,
+    ratings: { clarity: 4, visuals: 3, time: 3, qa: 5 },
+    comments: { visuals: "Slide 4 reads like a script. Cut it to three bullets." },
+    overall: "Strong Q&A on escalation tiers. Slow down in the middle section.",
+    marks: [
+      { id: "m-ex1", t: 95000, tag: "Great slide transition", tone: "good", note: "" },
+      { id: "m-ex2", t: 318000, tag: "Pacing too fast", tone: "warn", note: "Rushed the escalation matrix" },
+      { id: "m-ex3", t: 610000, tag: "Filler words", tone: "warn", note: "" }
+    ],
+    submittedAt: Date.now() - 86400000, synced: false
+  });
+  delete e.clock;
+  const s = computeScore(e.ratings, e.weights); e.total = s.total; e.avg = s.avg;
+  return e;
+}
+async function boot() {
+  try { idbConn = await withTimeout(idbOpen(), 3000); idbOK = true; } catch { idbOK = false; }
+  let d1 = null; try { d1 = await store.get("drafts", "current"); } catch {}
+  const d2 = LS.get("pe:draft");
+  const pick = [d1, d2].filter((d) => d && d.state && Array.isArray(d.state.marks)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  if (pick) state = Object.assign(newState(), pick.state);
+  try { evals = await store.all("evals"); } catch { evals = []; }
+  try { (await store.all("outbox")).forEach((o) => outbox.add(o.id)); } catch {}
+  let seeded = LS.get("pe:seeded"); try { seeded = seeded || !!(await store.get("drafts", "seeded")); } catch {}
+  if (!seeded && evals.length === 0) {
+    const ex = exampleEval(); evals.push(ex); await store.put("evals", ex);
+    LS.set("pe:seeded", 1); try { await store.put("drafts", { id: "seeded" }); } catch {}
+  }
+  if (!idbOK) $("draftState").textContent = "This browser blocks database storage, so drafts save to local storage instead.";
+  else if (pick) $("draftState").textContent = "Restored your unsaved draft from this device.";
+  applyStateToForm(); renderSaved(); renderNet();
+  getAdapter().then(() => flush());
+}
+boot();
+})();
+</script>
+</body>
+</html>
